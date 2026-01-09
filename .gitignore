@@ -1,0 +1,5 @@
+# Ignore EVERYTHING except bot.py and README.md
+*
+!bot.py
+!README.md
+!.gitignore
