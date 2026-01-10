@@ -1,4 +1,4 @@
-# 🤖 Nova - Sweet, Smug & Sassy Discord Bot
+# 🤖 Nova - Smug Discord Bot
 
 Nova started as a simple Discord bot to launch game servers for me and my friend. It's evolved into a multi-functional bot with system monitoring, AI chat, and a web dashboard.
 
