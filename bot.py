@@ -73,7 +73,7 @@ BASE_DIR = config.BASE_DIR
 MESSAGE_FILE = "server_message.json"  # Persists dashboard message ID
 
 # Bot Version
-BOT_ver = "v1.18.0"
+BOT_ver = "v2.0.0"
 
 # Load environment variables from .env file
 load_dotenv(r"E:\..SERVERS\_SERVERBOT\SECRETS\TOKENS.env")
@@ -1603,58 +1603,15 @@ def format_uptime(delta):
 
 @tasks.loop(seconds=30)
 async def update_server_status():
-	"""Update Discord dashboard embed with system stats and server status"""
-	global last_net_io, cpu_history, ram_history, net_up_history, net_down_history, update_counter, code_line_count
+	"""Update Discord dashboard embed - Compact with Full Names"""
+	global update_counter, code_line_count
 	
 	try:
 		update_counter += 1
 		
-		# Update code stats
 		code_line_count = count_code_lines(bot_file_path)
 		char_count = count_characters(bot_file_path)
 		
-		# System stats
-		cpu_percent = psutil.cpu_percent()
-		cpu_cores = psutil.cpu_count(logical=True)
-		memory = psutil.virtual_memory()
-		
-		net_io = psutil.net_io_counters()
-		
-		# Network MB/s (5s interval)
-		if last_net_io:
-			interval = 5
-			up_mb = (net_io.bytes_sent - last_net_io.bytes_sent) / interval / 1024 / 1024
-			down_mb = (net_io.bytes_recv - last_net_io.bytes_recv) / interval / 1024 / 1024
-		else:
-			up_mb = 0
-			down_mb = 0
-		
-		last_net_io = net_io
-		
-		# Histories
-		cpu_history.append(cpu_percent)
-		ram_history.append(memory.percent)
-		net_up_history.append(up_mb)
-		net_down_history.append(down_mb)
-		
-		# GPU
-		gpu_usage = 0
-		gpus = GPUtil.getGPUs()
-		if gpus:
-			gpu_usage = gpus[0].load * 100
-
-		disk_info = []
-		for part in psutil.disk_partitions():
-			try:
-				usage = psutil.disk_usage(part.mountpoint)
-				bar = progress_bar(usage.percent)
-				disk_info.append(
-					f"• {part.mountpoint}: "
-					f"`{usage.used/1e9:.1f}/{usage.total/1e9:.1f}GB {bar} {usage.percent}%`"
-				)
-			except Exception:
-				continue
-
 		servers = [
 			{"name": "Valheim",   "executable": "valheim_server.exe", "ip": config.SERVER_IP, "port": 2456,  "password": ""},
 			{"name": "DayZ",      "executable": "DayZServer_x64.exe", "ip": config.SERVER_IP, "port": 2302,  "password": ""},
@@ -1662,158 +1619,116 @@ async def update_server_status():
 			{"name": "Rust",      "executable": "RustDedicated.exe",  "ip": config.SERVER_IP, "port": 28015, "password": ""},
 			{"name": "SCUM",      "executable": "SCUMServer.exe",     "ip": config.SERVER_IP, "port": 7042,  "password": ""},
 		]
-
-		embed = discord.Embed(
-			title=f"Nova Dashboard ({BOT_ver})",
-			color=0x006400,
-			timestamp=datetime.now()
-		)
-
-		uptime_delta = datetime.now() - bot_start_time
-		uptime_str = format_uptime(uptime_delta)
-
-		embed.set_footer(
-			text=f"Live Monitoring • Updated every minute • Update count: {update_counter} • Uptime: {uptime_str}"
-		)
-
-		cpu_bar = progress_bar(cpu_percent)
-		ram_bar = progress_bar(memory.percent)
-		gpu_bar = progress_bar(gpu_usage)
-
-		embed.add_field(
-			name="⚙️ RESOURCE MONITOR",
-			value=(
-				f"`CPU: {cpu_percent:>5.1f}% {cpu_bar}`\n"
-				f"`RAM: {memory.percent:>5.1f}% {ram_bar}`\n"
-				f"`GPU: {gpu_usage:>5.1f}% {gpu_bar}`\n"
-				f"**Disk Usage:**\n" + ("\n".join(disk_info) if disk_info else "No disks found")
-			),
-			inline=False
-		)
-
-		embed.add_field(
-			name="🌐 NETWORK TRAFFIC (MB/min)",
-			value=(
-				f"`Upload:   {net_up_history[-1]:.1f} MB/min`\n"
-				f"`Download: {net_down_history[-1]:.1f} MB/min`"
-			),
-			inline=False
-		)
-
-		public_ip = await get_public_ip()
-		expected_public_ip = os.getenv('EXPECTED_PUBLIC_IP', '')
-		public_ip_warning = ""
-		if public_ip and public_ip != expected_public_ip:
-			public_ip_warning = f"\n⚠️ Current public IP `{public_ip}` does not match expected `{expected_public_ip}` — @{config.KS_NAME}\n\n`If not expected, @{config.KS_NAME}`"
-		else:
-			public_ip_warning = "\n\n`If not expected, @{config.KS_NAME}`"
-
-		embed.add_field(
-			name="🌍 Public Server IP",
-			value=f"Expected: `{expected_public_ip}`\nCurrent: `{public_ip or 'Unknown'}`{public_ip_warning}",
-			inline=False
-		)
-
-		local_ip = get_local_ip()
-		expected_local_ip = os.getenv('EXPECTED_LOCAL_IP', '')
-		local_ip_warning = ""
-		if local_ip and local_ip != expected_local_ip:
-			local_ip_warning = f"\n⚠️ Current local IP `{local_ip}` does not match expected `{expected_local_ip}` — @{config.KS_NAME}\n\n`If not expected, @{config.KS_NAME}`"
-		else:
-			local_ip_warning = "\n\n`If not expected, @{config.KS_NAME}`"
-
-		embed.add_field(
-			name="🏠 Local PC IP",
-			value=f"Expected: `{expected_local_ip}`\nCurrent: `{local_ip or 'Unknown'}`{local_ip_warning}",
-			inline=False
-		)
-
-		embed.add_field(
-			name="📄 Bot.py Code Lines",
-			value=f"`{code_line_count}` lines of code (excluding comments/blank) SEND HELP!",
-			inline=False
-		)
-		embed.add_field(
-			name="🔤 Bot.py Character Count",
-			value=f"`{char_count}` characters total",
-			inline=False
-		)
-		grid_layout = ["Valheim", "DayZ", "Minecraft", "Rust", "SCUM", None]
-		for name in grid_layout:
-			if not name:
-				embed.add_field(name="\u200b", value="\u200b", inline=True)
-				continue
-
-			srv = next(s for s in servers if s["name"] == name)
-			is_running = check_server_process(srv['executable'])
-			status_icon = "🟢" if is_running else "🔴"
-
-			# Backup check
-			backup_folder = os.path.join(backup_root, name.upper())
-			if os.path.exists(backup_folder) and os.path.isdir(backup_folder):
-				total_size = 0
+		
+		# Calculate backup size
+		backup_total = 0
+		for srv in servers:
+			backup_folder = os.path.join(backup_root, srv['name'].upper())
+			if os.path.exists(backup_folder):
 				for dirpath, dirnames, filenames in os.walk(backup_folder):
 					for f in filenames:
-						fp = os.path.join(dirpath, f)
 						try:
-							total_size += os.path.getsize(fp)
+							backup_total += os.path.getsize(os.path.join(dirpath, f))
 						except Exception:
 							continue
-				size_gb = total_size / 1e9
-				backup_info = f"✅ `{size_gb:.2f} GB`"
-			else:
-				backup_info = "❌"
-
-			value = (
-				f"IP: `{srv['ip']}:{srv['port']}`\n"
-				f"Pass: `{srv['password'] or 'none'}`\n"
-				f"Status: `{'Running' if is_running else 'Offline'}`\n"
-				f"Backup: {backup_info}"
-			)
-			if is_running:
-				for proc in psutil.process_iter(['name','cpu_percent','memory_info']):
-					if srv['executable'].lower() in proc.info['name'].lower():
-						proc_cpu = proc.info['cpu_percent'] / cpu_cores
-						proc_ram_gb = proc.info['memory_info'].rss / 1024**3
-						value += (
-							f"\nCPU: `{proc_cpu:.1f}%`\nRAM: `{proc_ram_gb:.2f}GB`"
-						)
-						break
-
-			embed.add_field(name=f"{status_icon} {srv['name']}", value=value, inline=True)
-
+		
+		backup_gb = backup_total / 1e9
+		
+		# Create dark theme embed
+		embed = discord.Embed(
+			title=f"🖥️ **NOVA v{BOT_ver}** • Every 30s",
+			color=0x89b4fa,  # Linux blue
+			timestamp=datetime.now()
+		)
+		
+		# TOP ROW: System Dashboard with Bot Stats
+		uptime_delta = datetime.now() - bot_start_time
+		uptime_str = format_uptime(uptime_delta)
+		public_ip = await get_public_ip()
+		
+		dashboard_content = (
+			f"⏱️ `{uptime_str}` • 🌍 `{public_ip or '...'}`\n"
+			f"**BOT STATS**\n"
+			f"Lines: `{code_line_count}` • Chars: `{char_count:,}`"
+		)
+		
+		embed.add_field(
+			name="📊 **SYSTEM DASHBOARD**",
+			value=dashboard_content,
+			inline=False
+		)
+		
+		# SERVER STATUS: Horizontal with full names
+		server_line = ""
+		for srv in servers:
+			is_running = check_server_process(srv['executable'])
+			status_icon = "🟢" if is_running else "🔴"
+			server_line += f"{status_icon} `{srv['name']}` "
+		
+		server_line += f"\n📁 **BACKUPS:** `{backup_gb:.1f}GB`"
+		
+		embed.add_field(
+			name="🎮 **SERVER STATUS**",
+			value=server_line,
+			inline=False
+		)
+		
+		# CONTROL PANEL with clean URL
+		website_url = "https://benedictory-postaxially-aretha.ngrok-free.dev/"
+		
+		controls_content = (
+			f"**WEBSITE:** `Online` • 🔗 [Click Here]({website_url}) • **Ver:** `BETA 0.8`\n"
+			f"**CONTROLS:** `Click buttons below`"
+		)
+		
+		embed.add_field(
+			name="🔧 **CONTROL PANEL**",
+			value=controls_content,
+			inline=False
+		)
+		
+		# Footer with GitHub only
+		github_url = "https://github.com/Neks-Git"
+		embed.set_footer(
+			text=f"Made by [NeKs]({github_url})",
+			icon_url="https://cdn.discordapp.com/emojis/1106366380393107476.gif"
+		)
+		
+		# Horizontal button row with full names
 		class DashboardView(discord.ui.View):
 			def __init__(self):
 				super().__init__(timeout=None)
+				
 				for srv in servers:
-					self.add_item(
-						discord.ui.Button(
-							label=f"Start {srv['name']}",
-							style=discord.ButtonStyle.green,
-							custom_id=f"start_{srv['name'].lower()}"
-						)
+					is_running = check_server_process(srv['executable'])
+					
+					button = discord.ui.Button(
+						label=srv['name'],
+						style=discord.ButtonStyle.primary if not is_running else discord.ButtonStyle.danger,
+						custom_id=f"start_{srv['name'].lower()}",
+						emoji="▶️" if not is_running else "⏹️"
 					)
-
+					self.add_item(button)
+		
+		# Send/update message
 		channel = bot.get_channel(bot.status_channel_id)
 		if not channel:
-			print(f"[DEBUG] Channel {bot.status_channel_id} not found, skipping update.")
 			return
-
+		
 		message_id = load_message_id()
 		try:
 			message = await channel.fetch_message(message_id) if message_id else None
 		except discord.NotFound:
 			message = None
-
+		
 		if message:
 			await message.edit(embed=embed, view=DashboardView())
 		else:
 			new_message = await channel.send(embed=embed, view=DashboardView())
 			save_message_id(new_message.id)
-
+		
 	except Exception as e:
 		print(f"Exception in update_server_status: {e}")
-
 
 # ============================================================================
 # INTERACTION HANDLER
