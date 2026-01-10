@@ -16,7 +16,7 @@ import shutil
 import platform
 import sys
 sys.path.append(r"E:\..SERVERS\_SERVERBOT\CONFIG")
-import config
+import config # pyright: ignore[reportMissingImports]
 import socket
 
 # Asynchronous & Timing
