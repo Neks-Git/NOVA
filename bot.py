@@ -1025,13 +1025,13 @@ class HectorBot(commands.Bot):
 			
 			if session_age < 86400:
 				print(f"📊 Serving dashboard to {session_data['username']}")
-				return web.FileResponse(r'E:\..SERVERS\_SERVERBOT\WEBSITE\dashboard.html')
+				return web.FileResponse(r'E:\..SERVERS\_SERVERBOT\NOVA_WEBSITE\dashboard.html')
 			else:
 				print(f"⏰ Session expired for {session_data['username']}")
 				del self.active_sessions[session_token]
 		
 		print("🔒 Serving login page")
-		return web.FileResponse(r'E:\..SERVERS\_SERVERBOT\WEBSITE\login.html')
+		return web.FileResponse(r'E:\..SERVERS\_SERVERBOT\NOVA_WEBSITE\login.html')
 
 	async def handle_login(self, request):
 		"""Process login form"""
