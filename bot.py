@@ -640,7 +640,7 @@ class HectorBot(commands.Bot):
 			print(error_msg)
 			
 			if user_id == self.ks_id:
-				return f"Tch, *FILTERED* error... probably {self.KS_NAME}' fault: {str(e)[:50]}..."
+				return f"Tch, *FILTERED* error... probably {self.ks_name}' fault: {str(e)[:50]}..."
 			elif user_id == self.ey_id:
 				return "Oh biscuits! Nova glitched... could you ask again, love?"
 			else:
