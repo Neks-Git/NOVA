@@ -1,4 +1,4 @@
-# 🤖 Nova - Smug Discord Bot
+#  Nova - Discord Bot
 
 Nova started as a simple Discord bot to launch game servers for me and my friend. It's evolved into a multi-functional bot with system monitoring, AI chat, and a web dashboard.
 
@@ -9,42 +9,42 @@ License
 Do whatever you want with it
 -Neks
 
-## ✨ Features
+##  Features
 
-### 🎮 **Game Server Management**
+###  **Game Server Management**
 - Start/stop Valheim, DayZ, Minecraft, Rust, SCUM servers etc
 - Automated backups with rotation
 - Server status monitoring (CPU/RAM usage)
 - Interactive control panels with real-time stats
 
-### 📊 **System Monitoring Dashboard**
+###  **System Monitoring Dashboard**
 - Real-time CPU, RAM, GPU, and disk usage
 - Network traffic monitoring (upload/download)
 - Live Discord embed updates every 30 seconds
 - WebSocket dashboard for real-time data
 
-### 🤖 **AI Personality Chat**
+###  **AI Personality Chat**
 - OpenAI GPT-4 powered conversations
 - Unique Nova personality: sweet, smug, and sassy
 - Context-aware chat history
 - Tenor GIF integration for expressive responses
 - Dynamic tone based on user identity
 
-### 🌐 **Web Interface**
+###  **Web Interface**
 - Secure authentication system
 - File upload for screenshots/clips
 - Server control panel
 - Real-time system monitoring via WebSocket
 - Mobile-responsive dashboard
 
-### 🔧 **Automation & Utilities**
+###  **Automation & Utilities**
 - Weekly automated backups
 - Backup integrity checks
 - IP monitoring with alerts
 - File management system
 - Water reminder system (configurable)
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 - Python 3.11+
