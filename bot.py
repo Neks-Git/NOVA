@@ -1898,6 +1898,13 @@ async def on_interaction(interaction: discord.Interaction):
 				self.message_id = None
 				self.update_task = None
 				self.stats = ServerStats()
+				
+				# Add buttons directly in __init__
+				self.add_item(self.StartButton(server_name))
+				self.add_item(self.StopButton(server_name))
+				self.add_item(self.BackupButton(server_name))
+				self.add_item(self.RefreshButton())
+				self.add_item(self.ResetStatsButton())
 			
 			async def start_auto_update(self):
 				await asyncio.sleep(2)
@@ -1930,81 +1937,136 @@ async def on_interaction(interaction: discord.Interaction):
 				except Exception as e:
 					print(f"[{self.server_name}] Panel update failed: {e}")
 			
-			@discord.ui.button(label="▶️ Start Server", style=discord.ButtonStyle.green)
-			async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
-				await interaction.response.defer(ephemeral=True)
-				start_command = {
-					"Valheim": "startvalheim",
-					"DayZ": "startdayz",
-					"Minecraft": "startminecraft",
-					"Rust": "startrust",
-					"SCUM": "startscum"
-				}.get(self.server_name)
+			# Define button classes separately
+			class StartButton(discord.ui.Button):
+				def __init__(self, server_name):
+					super().__init__(label="▶️ Start Server", style=discord.ButtonStyle.green, custom_id=f"start_btn_{server_name}")
+					self.server_name = server_name
+				
+				async def callback(self, interaction: discord.Interaction):
+					await interaction.response.defer(ephemeral=True)
+					start_command = {
+						"Valheim": "startvalheim",
+						"DayZ": "startdayz",
+						"Minecraft": "startminecraft",
+						"Rust": "startrust",
+						"SCUM": "startscum"
+					}.get(self.server_name.title())
 
-				if start_command:
-					command = bot.get_command(start_command)
-					if command:
+					if start_command:
+						command = bot.get_command(start_command)
+						if command:
+							ctx = await bot.get_context(interaction.message)
+							ctx.author = interaction.user
+							await command(ctx)
+							await asyncio.sleep(3)
+							
+							# Find and update the parent view
+							view = interaction.message.view
+							if view and hasattr(view, 'update_panel'):
+								await view.update_panel()
+							
+							await interaction.followup.send("✅ Server started! Panel updating...", ephemeral=True)
+						else:
+							await interaction.followup.send("❌ Command not found!", ephemeral=True)
+					else:
+						await interaction.followup.send("❌ Unknown server!", ephemeral=True)
+
+			class StopButton(discord.ui.Button):
+				def __init__(self, server_name):
+					super().__init__(label="⏹️ Stop Server", style=discord.ButtonStyle.red, custom_id=f"stop_btn_{server_name}")
+					self.server_name = server_name
+				
+				async def callback(self, interaction: discord.Interaction):
+					await interaction.response.defer(ephemeral=True)
+					
+					# Shutdown command mapping
+					shutdown_commands = {
+						"Valheim": shutdownvalheim,
+						"DayZ": shutdowndayz,
+						"Minecraft": shutdownminecraft,
+						"SCUM": shutdownscum
+					}
+					
+					# Try exact match first, then case-insensitive
+					shutdown_command = shutdown_commands.get(self.server_name)
+					
+					if not shutdown_command:
+						# Try case-insensitive match
+						for name, cmd in shutdown_commands.items():
+							if name.lower() == self.server_name.lower():
+								shutdown_command = cmd
+								break
+					
+					if shutdown_command:
 						ctx = await bot.get_context(interaction.message)
 						ctx.author = interaction.user
-						await command(ctx)
-						await asyncio.sleep(3)
-						await self.update_panel()
-						await interaction.followup.send("✅ Server started! Panel updating...", ephemeral=True)
+						await shutdown_command(ctx)
+						await asyncio.sleep(2)
+						
+						# Find and update the parent view
+						view = interaction.message.view
+						if view and hasattr(view, 'update_panel'):
+							await view.update_panel()
+						
+						await interaction.followup.send("✅ Server stopped! Panel updating...", ephemeral=True)
 					else:
-						await interaction.followup.send("❌ Command not found!", ephemeral=True)
-				else:
-					await interaction.followup.send("❌ Unknown server!", ephemeral=True)
+						await interaction.followup.send(f"❌ Unknown server! (Got: {self.server_name})", ephemeral=True)
 
-			@discord.ui.button(label="⏹️ Stop Server", style=discord.ButtonStyle.red)
-			async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
-				await interaction.response.defer(ephemeral=True)
-				shutdown_command = {
-					"Valheim": shutdownvalheim,
-					"DayZ": shutdowndayz,
-					"Minecraft": shutdownminecraft,
-					"SCUM": shutdownscum
-				}.get(self.server_name)
+			class BackupButton(discord.ui.Button):
+				def __init__(self, server_name):
+					super().__init__(label="💾 Create Backup", style=discord.ButtonStyle.blurple, custom_id=f"backup_btn_{server_name}")
+					self.server_name = server_name
+				
+				async def callback(self, interaction: discord.Interaction):
+					await interaction.response.defer(ephemeral=True)
+					
+					# Backup command mapping
+					backup_map = {
+						"valheim": backupvalheim,
+						"dayz": backupdayz,
+						"minecraft": backupminecraft,
+						"scum": backupscum
+					}
+					
+					# Convert server name to lowercase for matching
+					backup_command = backup_map.get(self.server_name.lower())
+					
+					if backup_command:
+						ctx = await bot.get_context(interaction.message)
+						ctx.author = interaction.user
+						await backup_command(ctx)
+						await interaction.followup.send("✅ Backup created!", ephemeral=True)
+					else:
+						await interaction.followup.send(f"❌ Unknown server: '{self.server_name}'!", ephemeral=True)
 
-				if shutdown_command:
-					ctx = await bot.get_context(interaction.message)
-					ctx.author = interaction.user
-					await shutdown_command(ctx)
-					await asyncio.sleep(2)
-					await self.update_panel()
-					await interaction.followup.send("✅ Server stopped! Panel updating...", ephemeral=True)
-				else:
-					await interaction.followup.send("❌ Unknown server!", ephemeral=True)
+			class RefreshButton(discord.ui.Button):
+				def __init__(self):
+					super().__init__(label="🔄 Refresh Now", style=discord.ButtonStyle.gray, custom_id="refresh_btn")
+				
+				async def callback(self, interaction: discord.Interaction):
+					await interaction.response.defer(ephemeral=True)
+					view = interaction.message.view
+					if view and hasattr(view, 'update_panel'):
+						await view.update_panel()
+						await interaction.followup.send("✅ Panel refreshed!", ephemeral=True)
+					else:
+						await interaction.followup.send("❌ Could not refresh panel", ephemeral=True)
 
-			@discord.ui.button(label="💾 Create Backup", style=discord.ButtonStyle.blurple)
-			async def backup(self, interaction: discord.Interaction, button: discord.ui.Button):
-				await interaction.response.defer(ephemeral=True)
-				backup_command = {
-					"Valheim": backupvalheim,
-					"DayZ": backupdayz,
-					"Minecraft": backupminecraft,
-					"SCUM": backupscum
-				}.get(self.server_name)
-
-				if backup_command:
-					ctx = await bot.get_context(interaction.message)
-					ctx.author = interaction.user
-					await backup_command(ctx)
-					await interaction.followup.send("✅ Backup created!", ephemeral=True)
-				else:
-					await interaction.followup.send("❌ Unknown server!", ephemeral=True)
-
-			@discord.ui.button(label="🔄 Refresh Now", style=discord.ButtonStyle.gray)
-			async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-				await interaction.response.defer(ephemeral=True)
-				await self.update_panel()
-				await interaction.followup.send("✅ Panel refreshed!", ephemeral=True)
-
-			@discord.ui.button(label="📊 Reset Stats", style=discord.ButtonStyle.gray)
-			async def reset_stats(self, interaction: discord.Interaction, button: discord.ui.Button):
-				await interaction.response.defer(ephemeral=True)
-				self.stats = ServerStats()
-				await self.update_panel()
-				await interaction.followup.send("✅ Session stats reset!", ephemeral=True)
+			class ResetStatsButton(discord.ui.Button):
+				def __init__(self):
+					super().__init__(label="📊 Reset Stats", style=discord.ButtonStyle.gray, custom_id="reset_stats_btn")
+				
+				async def callback(self, interaction: discord.Interaction):
+					await interaction.response.defer(ephemeral=True)
+					view = interaction.message.view
+					if view and hasattr(view, 'stats'):
+						view.stats = ServerStats()
+						if hasattr(view, 'update_panel'):
+							await view.update_panel()
+						await interaction.followup.send("✅ Session stats reset!", ephemeral=True)
+					else:
+						await interaction.followup.send("❌ Could not reset stats", ephemeral=True)
 
 		view_instance = AutoUpdateControlPanel(
 			server_name, 
