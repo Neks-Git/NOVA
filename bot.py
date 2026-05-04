@@ -42,8 +42,8 @@ import aiohttp
 import urllib.parse
 from aiohttp import web
 import secrets
-
-
+import struct
+from aiomcrcon import Client
 # External APIs & Libraries
 from openai import AsyncOpenAI
 import GPUtil
@@ -174,6 +174,19 @@ def check_server_process(executable_name):
 			return True
 	return False
 
+
+# ============================================================================
+# RCON
+# ============================================================================
+from aiomcrcon import Client
+
+async def send_rcon_command(host, port, password, command):
+    try:
+        async with Client(host, port, password) as client:
+            response = await client.send_cmd(command)
+            return True, response
+    except Exception as e:
+        return False, str(e)
 # ============================================================================
 # BOT CLASS INITIALIZATION & ATTRIBUTES
 # ============================================================================
@@ -1618,6 +1631,8 @@ async def update_server_status():
 			{"name": "Minecraft", "executable": "java.exe",           "ip": config.SERVER_IP, "port": 25565, "password": ""},
 			{"name": "Rust",      "executable": "RustDedicated.exe",  "ip": config.SERVER_IP, "port": 28015, "password": ""},
 			{"name": "SCUM",      "executable": "SCUMServer.exe",     "ip": config.SERVER_IP, "port": 7042,  "password": ""},
+			{"name": "MCsuperflat",   "executable": "java.exe",       "ip": config.SERVER_IP, "port": 25565, "password": ""},
+			{"name": "MCprominence",  "executable": "java.exe",       "ip": config.SERVER_IP, "port": 25565, "password": ""},
 		]
 		
 		# Calculate backup size
@@ -1736,23 +1751,22 @@ async def update_server_status():
 
 @bot.listen()
 async def on_interaction(interaction: discord.Interaction):
-	"""Handle dashboard button interactions for server control panels"""
 	if not interaction.data or "custom_id" not in interaction.data:
 		return
 
 	custom_id = interaction.data["custom_id"]
-	
+	print(f"DEBUG: custom_id = '{custom_id}'")  # <-- ADD THIS
+
 	# Handle start buttons from dashboard
-	if custom_id.startswith("start_"):
-		server_name = custom_id.split("_")[1].upper()
+	if custom_id.startswith("start_") and "_btn_" not in custom_id:
+		server_name = custom_id.split("_")[1].upper()  # e.g., "MCSUPERFLAT"
+		print(f"DEBUG: Extracted server_name = '{server_name}'")  # <-- ADD THIS
+
 		cmd_channel = bot.get_channel(REMINDER_CHANNEL_ID)
-		
 		if not cmd_channel:
-			await interaction.response.send_message(
-				"❌ Commands channel not found!",
-				ephemeral=True
-			)
+			await interaction.response.send_message("❌ Commands channel not found!", ephemeral=True)
 			return
+
 
 		servers_info = [
 			{"name": "Valheim",   "executable": "valheim_server.exe", "ip": EXPECTED_PUBLIC_IP, "port": 2456,  "password": ""},
@@ -1760,13 +1774,22 @@ async def on_interaction(interaction: discord.Interaction):
 			{"name": "Minecraft", "executable": "java.exe",           "ip": EXPECTED_PUBLIC_IP, "port": 25565, "password": ""},
 			{"name": "Rust",      "executable": "RustDedicated.exe",  "ip": EXPECTED_PUBLIC_IP, "port": 28015, "password": ""},
 			{"name": "SCUM",      "executable": "SCUMServer.exe",     "ip": EXPECTED_PUBLIC_IP, "port": 7042,  "password": ""},
+			{"name": "MCsuperflat",   "executable": "java.exe",       "ip": EXPECTED_PUBLIC_IP, "port": 25565, "password": ""},
+			{"name": "MCprominence",  "executable": "java.exe",       "ip": EXPECTED_PUBLIC_IP, "port": 25565, "password": ""},
 		]
-		
+		print(f"DEBUG: Available names: {[s['name'] for s in servers_info]}")  # <-- ADD THIS
+
 		server_info = None
 		for s in servers_info:
 			if s["name"].lower() == server_name.lower():
 				server_info = s
 				break
+
+		if server_info is None:
+			print(f"ERROR: No match found for '{server_name}'")
+			await interaction.response.send_message(f"❌ Server '{server_name}' not configured.", ephemeral=True)
+			return
+
 
 		# Track max values for this server session
 		class ServerStats:
@@ -1903,8 +1926,7 @@ async def on_interaction(interaction: discord.Interaction):
 				self.add_item(self.StartButton(server_name))
 				self.add_item(self.StopButton(server_name))
 				self.add_item(self.BackupButton(server_name))
-				self.add_item(self.RefreshButton())
-				self.add_item(self.ResetStatsButton())
+
 			
 			async def start_auto_update(self):
 				await asyncio.sleep(2)
@@ -1942,131 +1964,105 @@ async def on_interaction(interaction: discord.Interaction):
 				def __init__(self, server_name):
 					super().__init__(label="▶️ Start Server", style=discord.ButtonStyle.green, custom_id=f"start_btn_{server_name}")
 					self.server_name = server_name
-				
+
 				async def callback(self, interaction: discord.Interaction):
 					await interaction.response.defer(ephemeral=True)
-					start_command = {
-						"Valheim": "startvalheim",
-						"DayZ": "startdayz",
-						"Minecraft": "startminecraft",
-						"Rust": "startrust",
-						"SCUM": "startscum"
-					}.get(self.server_name.title())
 
-					if start_command:
-						command = bot.get_command(start_command)
+					start_command_map = {
+						"valheim": "startvalheim",
+						"dayz": "startdayz",
+						"minecraft": "startminecraft",
+						"rust": "startrust",
+						"scum": "startscum",
+						"mcsuperflat": "startmcsuperflat",
+						"mcprominence": "startmcprominence"
+					}
+
+					cmd_name = start_command_map.get(self.server_name.lower())
+					if cmd_name:
+						command = bot.get_command(cmd_name)
 						if command:
 							ctx = await bot.get_context(interaction.message)
 							ctx.author = interaction.user
-							await command(ctx)
-							await asyncio.sleep(3)
-							
-							# Find and update the parent view
-							view = interaction.message.view
-							if view and hasattr(view, 'update_panel'):
-								await view.update_panel()
-							
-							await interaction.followup.send("✅ Server started! Panel updating...", ephemeral=True)
+							try:
+								await command(ctx)
+								await asyncio.sleep(3)
+								# Update panel using the parent view
+								if hasattr(self, 'view') and self.view and hasattr(self.view, 'update_panel'):
+									await self.view.update_panel()
+								await interaction.followup.send("✅ Server started! Panel updating...", ephemeral=True)
+							except Exception as e:
+								print(f"Error starting server: {e}")
+								await interaction.followup.send(f"❌ Failed to start server: {e}", ephemeral=True)
 						else:
-							await interaction.followup.send("❌ Command not found!", ephemeral=True)
+							await interaction.followup.send(f"❌ Command '{cmd_name}' not found!", ephemeral=True)
 					else:
-						await interaction.followup.send("❌ Unknown server!", ephemeral=True)
+						await interaction.followup.send(f"❌ Unknown server '{self.server_name}'", ephemeral=True)
 
 			class StopButton(discord.ui.Button):
 				def __init__(self, server_name):
 					super().__init__(label="⏹️ Stop Server", style=discord.ButtonStyle.red, custom_id=f"stop_btn_{server_name}")
 					self.server_name = server_name
-				
+
 				async def callback(self, interaction: discord.Interaction):
 					await interaction.response.defer(ephemeral=True)
-					
-					# Shutdown command mapping
+
 					shutdown_commands = {
-						"Valheim": shutdownvalheim,
-						"DayZ": shutdowndayz,
-						"Minecraft": shutdownminecraft,
-						"SCUM": shutdownscum
+						"valheim": shutdownvalheim,
+						"dayz": shutdowndayz,
+						"minecraft": shutdownminecraft,
+						"scum": shutdownscum,
+						"mcsuperflat": shutdownmcsuperflat,
+						"mcprominence": shutdownmcprominence
 					}
-					
-					# Try exact match first, then case-insensitive
-					shutdown_command = shutdown_commands.get(self.server_name)
-					
-					if not shutdown_command:
-						# Try case-insensitive match
-						for name, cmd in shutdown_commands.items():
-							if name.lower() == self.server_name.lower():
-								shutdown_command = cmd
-								break
-					
-					if shutdown_command:
+
+					cmd = shutdown_commands.get(self.server_name.lower())
+					if cmd:
 						ctx = await bot.get_context(interaction.message)
 						ctx.author = interaction.user
-						await shutdown_command(ctx)
-						await asyncio.sleep(2)
-						
-						# Find and update the parent view
-						view = interaction.message.view
-						if view and hasattr(view, 'update_panel'):
-							await view.update_panel()
-						
-						await interaction.followup.send("✅ Server stopped! Panel updating...", ephemeral=True)
+						try:
+							await cmd(ctx)
+							await asyncio.sleep(2)
+							if hasattr(self, 'view') and self.view and hasattr(self.view, 'update_panel'):
+								await self.view.update_panel()
+							await interaction.followup.send("✅ Server stopped! Panel updating...", ephemeral=True)
+						except Exception as e:
+							print(f"Error stopping server: {e}")
+							await interaction.followup.send(f"❌ Failed to stop server: {e}", ephemeral=True)
 					else:
-						await interaction.followup.send(f"❌ Unknown server! (Got: {self.server_name})", ephemeral=True)
+						await interaction.followup.send(f"❌ Unknown server '{self.server_name}'", ephemeral=True)
 
 			class BackupButton(discord.ui.Button):
 				def __init__(self, server_name):
 					super().__init__(label="💾 Create Backup", style=discord.ButtonStyle.blurple, custom_id=f"backup_btn_{server_name}")
 					self.server_name = server_name
-				
+
 				async def callback(self, interaction: discord.Interaction):
 					await interaction.response.defer(ephemeral=True)
-					
-					# Backup command mapping
+
 					backup_map = {
 						"valheim": backupvalheim,
 						"dayz": backupdayz,
 						"minecraft": backupminecraft,
-						"scum": backupscum
+						"scum": backupscum,
+						"mcsuperflat": backupmcsuperflat,
+						"mcprominence": backupmcprominence
 					}
-					
-					# Convert server name to lowercase for matching
-					backup_command = backup_map.get(self.server_name.lower())
-					
-					if backup_command:
+
+					cmd = backup_map.get(self.server_name.lower())
+					if cmd:
 						ctx = await bot.get_context(interaction.message)
 						ctx.author = interaction.user
-						await backup_command(ctx)
-						await interaction.followup.send("✅ Backup created!", ephemeral=True)
+						try:
+							await cmd(ctx)
+							await interaction.followup.send("✅ Backup created!", ephemeral=True)
+						except Exception as e:
+							print(f"Error creating backup: {e}")
+							await interaction.followup.send(f"❌ Backup failed: {e}", ephemeral=True)
 					else:
-						await interaction.followup.send(f"❌ Unknown server: '{self.server_name}'!", ephemeral=True)
+						await interaction.followup.send(f"❌ Unknown server '{self.server_name}'", ephemeral=True)
 
-			class RefreshButton(discord.ui.Button):
-				def __init__(self):
-					super().__init__(label="🔄 Refresh Now", style=discord.ButtonStyle.gray, custom_id="refresh_btn")
-				
-				async def callback(self, interaction: discord.Interaction):
-					await interaction.response.defer(ephemeral=True)
-					view = interaction.message.view
-					if view and hasattr(view, 'update_panel'):
-						await view.update_panel()
-						await interaction.followup.send("✅ Panel refreshed!", ephemeral=True)
-					else:
-						await interaction.followup.send("❌ Could not refresh panel", ephemeral=True)
 
-			class ResetStatsButton(discord.ui.Button):
-				def __init__(self):
-					super().__init__(label="📊 Reset Stats", style=discord.ButtonStyle.gray, custom_id="reset_stats_btn")
-				
-				async def callback(self, interaction: discord.Interaction):
-					await interaction.response.defer(ephemeral=True)
-					view = interaction.message.view
-					if view and hasattr(view, 'stats'):
-						view.stats = ServerStats()
-						if hasattr(view, 'update_panel'):
-							await view.update_panel()
-						await interaction.followup.send("✅ Session stats reset!", ephemeral=True)
-					else:
-						await interaction.followup.send("❌ Could not reset stats", ephemeral=True)
 
 		view_instance = AutoUpdateControlPanel(
 			server_name, 
@@ -2608,7 +2604,78 @@ async def startminecraft(ctx):
 		error_embed.add_field(name="Details", value=f"```{str(e)}```", inline=False)
 		error_embed.set_footer(text="Please check the server configuration")
 		await message.edit(embed=error_embed)
+@bot.command()
+async def startmcsuperflat(ctx):
+    """Start MCsuperflat modded Minecraft server"""
+    server_directory = r'E:\..SERVERS\MINECRAFTMODDED\superflat'
+    jar_file = 'server.jar'
+    
+    embed = discord.Embed(
+        title="MCsuperflat Server Manager",
+        description="Starting the MCsuperflat server...",
+        color=discord.Color.orange()
+    )
+    embed.add_field(name="Status", value="⚙️ Initializing...", inline=False)
+    message = await ctx.send(embed=embed)
+    
+    try:
+        command = f'java -Xmx4G -Xms2G -jar {jar_file} nogui'
+        subprocess.Popen(f'start cmd /k "{command}"', shell=True, cwd=server_directory)
+        
+        embed.colour = discord.Color.gold()
+        embed.set_field_at(0, name="Status", value="🚀 Launching server process...", inline=False)
+        await message.edit(embed=embed)
+        
+        await asyncio.sleep(10)
+        
+        if check_server_process("java.exe"):
+            embed.colour = discord.Color.green()
+            embed.set_field_at(0, name="Status", value="🟢 Server is running!", inline=False)
+            embed.add_field(name="Connection Info", value=f"```{EXPECTED_PUBLIC_IP}:25565```", inline=False)
+        else:
+            embed.colour = discord.Color.red()
+            embed.set_field_at(0, name="Status", value="🔴 Server failed to start", inline=False)
+        
+        await message.edit(embed=embed)
+    except Exception as e:
+        error_embed = discord.Embed(title="❌ Start Error", description=str(e), color=discord.Color.red())
+        await ctx.send(embed=error_embed)
 
+@bot.command()
+async def startmcprominence(ctx):
+    """Start MCprominence modded Minecraft server (Hastur)"""
+    server_directory = r'E:\..SERVERS\MINECRAFTMODDED\Hastur'
+    bat_file = 'STAAART.bat'
+    
+    embed = discord.Embed(
+        title="MCprominence Server Manager",
+        description="Starting the MCprominence server...",
+        color=discord.Color.orange()
+    )
+    embed.add_field(name="Status", value="⚙️ Initializing...", inline=False)
+    message = await ctx.send(embed=embed)
+    
+    try:
+        subprocess.Popen(f'start cmd /k "{bat_file}"', shell=True, cwd=server_directory)
+        
+        embed.colour = discord.Color.gold()
+        embed.set_field_at(0, name="Status", value="🚀 Launching server process...", inline=False)
+        await message.edit(embed=embed)
+        
+        await asyncio.sleep(15)  # modded server takes longer
+        
+        if check_server_process("java.exe"):
+            embed.colour = discord.Color.green()
+            embed.set_field_at(0, name="Status", value="🟢 Server is running!", inline=False)
+            embed.add_field(name="Connection Info", value=f"```{EXPECTED_PUBLIC_IP}:25565```", inline=False)
+        else:
+            embed.colour = discord.Color.red()
+            embed.set_field_at(0, name="Status", value="🔴 Server failed to start", inline=False)
+        
+        await message.edit(embed=embed)
+    except Exception as e:
+        error_embed = discord.Embed(title="❌ Start Error", description=str(e), color=discord.Color.red())
+        await ctx.send(embed=error_embed)
 @bot.command()
 async def startrust(ctx):
 	"""Start Rust dedicated server with connection guidance"""
@@ -2921,6 +2988,18 @@ async def run_combined_backup(ctx, server_name, server_dir, world_dir, backup_di
 		await status_msg.edit(embed=error_embed)
 
 BACKUP_CONFIG = {
+    "MCsuperflat": {
+        "server_dir": r'E:\..SERVERS\MINECRAFTMODDED\superflat',
+        "backup_dir": r'F:\GAMEBACKUPS\MCsuperflat',
+        "max_backups": 2,
+        "max_age_days": 7
+    },
+    "MCprominence": {
+        "server_dir": r'E:\..SERVERS\MINECRAFTMODDED\Hastur',
+        "backup_dir": r'F:\GAMEBACKUPS\MCprominence',
+        "max_backups": 2,
+        "max_age_days": 7
+    },
 	"Valheim": {
 		"server_dir": r'E:\..SERVERS\VALHEIM',
 		"world_dir": r'C:\Users\rekor\AppData\LocalLow\IronGate\Valheim',
@@ -3039,7 +3118,19 @@ async def backupminecraft(ctx):
 		config['backup_dir'],
 		max_backups=config['max_backups']
 	)
+@bot.command()
+async def backupmcsuperflat(ctx):
+    """Backup MCsuperflat server"""
+    source = r'E:\..SERVERS\MINECRAFTMODDED\superflat'
+    dest = r'F:\GAMEBACKUPS\MCsuperflat'
+    await run_backup(ctx, "MCsuperflat", source, dest, max_backups=2)
 
+@bot.command()
+async def backupmcprominence(ctx):
+    """Backup MCprominence server"""
+    source = r'E:\..SERVERS\MINECRAFTMODDED\Hastur'
+    dest = r'F:\GAMEBACKUPS\MCprominence'
+    await run_backup(ctx, "MCprominence", source, dest, max_backups=2)
 @bot.command()
 async def backupscum(ctx):
 	"""Backup SCUM server with admin privilege check"""
@@ -3163,47 +3254,198 @@ def stop_scum_server_simple():
 
 @bot.command()
 async def shutdownminecraft(ctx):
-	"""Force shutdown Minecraft (Fabric) server with Discord embeds"""
-	try:
-		starting_embed = discord.Embed(
-			title="🛑 Minecraft Server Shutdown",
-			description="🚨 Initiating Minecraft (Fabric) server shutdown...",
-			color=discord.Color.orange()
-		)
-		starting_embed.set_footer(text="This may take a moment...")
-		message = await ctx.send(embed=starting_embed)
-		
-		kill_minecraft_fabric_server()
-		
-		success_embed = discord.Embed(
-			title="✅ Minecraft Shutdown Complete",
-			description="The Minecraft (Fabric) server has been successfully shut down.",
-			color=discord.Color.green()
-		)
-		success_embed.set_footer(
-			text=f"Requested by {ctx.author.display_name}",
-			icon_url=ctx.author.avatar.url if ctx.author.avatar else None
-		)
-		
-		await message.edit(embed=success_embed)
-		
-		backup_embed = discord.Embed(
-			description=f"⚠️ **Backup Reminder**",
-			color=discord.Color.blue()
-		)
-		backup_embed.set_thumbnail(url="https://i.imgur.com/MS1Tc3C.png")
-		await ctx.send(embed=backup_embed)
-	
-	except Exception as e:
-		error_embed = discord.Embed(
-			title="❌ Minecraft Shutdown Failed",
-			description="An error occurred while shutting down the Minecraft server:",
-			color=discord.Color.red()
-		)
-		error_embed.add_field(name="Error Details", value=f"```{str(e)}```", inline=False)
-		error_embed.set_footer(text="Please check the server manually")
-		await ctx.send(embed=error_embed)
+    """Gracefully shutdown Minecraft (Fabric) server using RCON"""
+    embed = discord.Embed(
+        title="🛑 Minecraft Server Shutdown",
+        description="Sending RCON stop command...",
+        color=discord.Color.orange()
+    )
+    message = await ctx.send(embed=embed)
+    
+    success, response = await send_rcon_command("localhost", 25575, "salis", "stop")
+    
+    if success:
+        embed.description = f"✅ Stop command sent. Waiting for server to exit...\n```{response[:200]}```"
+        await message.edit(embed=embed)
+        
+        # Wait up to 30 seconds for process to vanish
+        for i in range(30):
+            if not check_server_process("java.exe"):
+                embed.colour = discord.Color.green()
+                embed.description = f"✅ Server shut down gracefully after {i+1} seconds."
+                await message.edit(embed=embed)
+                backup_embed = discord.Embed(description="⚠️ **Backup Reminder**", color=discord.Color.blue())
+                backup_embed.set_thumbnail(url="https://i.imgur.com/MS1Tc3C.png")
+                await ctx.send(embed=backup_embed)
+                return
+            await asyncio.sleep(1)
+        
+        # Timeout: force kill
+        embed.colour = discord.Color.red()
+        embed.description = "⚠️ Server did not stop after 30s. Forcing termination..."
+        await message.edit(embed=embed)
+        kill_minecraft_fabric_server()
+        embed.description = "⚠️ Server force‑terminated. World may not have saved fully."
+        await message.edit(embed=embed)
+    else:
+        embed.colour = discord.Color.red()
+        embed.description = f"❌ RCON failed: {response}\nFalling back to force termination..."
+        await message.edit(embed=embed)
+        kill_minecraft_fabric_server()
+        embed.description = "⚠️ Server force‑terminated (RCON issue)."
+        await message.edit(embed=embed)
+@bot.command()
+async def shutdownmcsuperflat(ctx):
+    """Gracefully shutdown MCsuperflat modded server using RCON"""
+    embed = discord.Embed(
+        title="🛑 MCsuperflat Server Shutdown",
+        description="Sending RCON stop command...",
+        color=discord.Color.orange()
+    )
+    message = await ctx.send(embed=embed)
 
+    # Use same RCON settings as your vanilla server (adjust if needed)
+    success, response = await send_rcon_command("localhost", 25575, "salis", "stop")
+
+    if success:
+        embed.description = f"✅ Stop command sent. Waiting for server to exit...\n```{response[:200]}```"
+        await message.edit(embed=embed)
+
+        # Wait up to 45 seconds for the specific Java process in the superflat folder to exit
+        for i in range(45):
+            found = False
+            for proc in psutil.process_iter(['pid', 'name', 'cwd']):
+                try:
+                    if (proc.info['name'] == 'java.exe' and proc.info['cwd'] and 
+                        'superflat' in proc.info['cwd'].lower()):
+                        found = True
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            if not found:
+                embed.colour = discord.Color.green()
+                embed.description = f"✅ Server shut down gracefully after {i+1} seconds."
+                await message.edit(embed=embed)
+
+                # Backup reminder
+                backup_embed = discord.Embed(description="⚠️ **Backup Reminder**", color=discord.Color.blue())
+                backup_embed.set_thumbnail(url="https://i.imgur.com/MS1Tc3C.png")
+                await ctx.send(embed=backup_embed)
+                return
+            await asyncio.sleep(1)
+
+        # Timeout – force kill only the superflat process
+        embed.colour = discord.Color.red()
+        embed.description = "⚠️ Server did not stop after 45s. Forcing termination..."
+        await message.edit(embed=embed)
+
+        for proc in psutil.process_iter(['pid', 'name', 'cwd']):
+            try:
+                if (proc.info['name'] == 'java.exe' and proc.info['cwd'] and 
+                    'superflat' in proc.info['cwd'].lower()):
+                    proc.terminate()
+                    await asyncio.sleep(2)
+                    if proc.is_running():
+                        proc.kill()
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        embed.description = "⚠️ Server force‑terminated. World may not have saved fully."
+        await message.edit(embed=embed)
+    else:
+        embed.colour = discord.Color.red()
+        embed.description = f"❌ RCON failed: {response}\nFalling back to force termination..."
+        await message.edit(embed=embed)
+
+        # Force kill as above
+        for proc in psutil.process_iter(['pid', 'name', 'cwd']):
+            try:
+                if (proc.info['name'] == 'java.exe' and proc.info['cwd'] and 
+                    'superflat' in proc.info['cwd'].lower()):
+                    proc.terminate()
+                    await asyncio.sleep(2)
+                    if proc.is_running():
+                        proc.kill()
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        embed.description = "⚠️ Server force‑terminated (RCON issue)."
+        await message.edit(embed=embed)
+
+@bot.command()
+async def shutdownmcprominence(ctx):
+    """Gracefully shutdown MCprominence (Hastur) modded server using RCON"""
+    embed = discord.Embed(
+        title="🛑 MCprominence Server Shutdown",
+        description="Sending RCON stop command...",
+        color=discord.Color.orange()
+    )
+    message = await ctx.send(embed=embed)
+
+    success, response = await send_rcon_command("localhost", 25575, "salis", "stop")
+
+    if success:
+        embed.description = f"✅ Stop command sent. Waiting for server to exit...\n```{response[:200]}```"
+        await message.edit(embed=embed)
+
+        for i in range(60):  # Modded may need longer
+            found = False
+            for proc in psutil.process_iter(['pid', 'name', 'cwd']):
+                try:
+                    if (proc.info['name'] == 'java.exe' and proc.info['cwd'] and 
+                        'hastur' in proc.info['cwd'].lower()):
+                        found = True
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            if not found:
+                embed.colour = discord.Color.green()
+                embed.description = f"✅ Server shut down gracefully after {i+1} seconds."
+                await message.edit(embed=embed)
+
+                backup_embed = discord.Embed(description="⚠️ **Backup Reminder**", color=discord.Color.blue())
+                backup_embed.set_thumbnail(url="https://i.imgur.com/MS1Tc3C.png")
+                await ctx.send(embed=backup_embed)
+                return
+            await asyncio.sleep(1)
+
+        embed.colour = discord.Color.red()
+        embed.description = "⚠️ Server did not stop after 60s. Forcing termination..."
+        await message.edit(embed=embed)
+
+        for proc in psutil.process_iter(['pid', 'name', 'cwd']):
+            try:
+                if (proc.info['name'] == 'java.exe' and proc.info['cwd'] and 
+                    'hastur' in proc.info['cwd'].lower()):
+                    proc.terminate()
+                    await asyncio.sleep(2)
+                    if proc.is_running():
+                        proc.kill()
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        embed.description = "⚠️ Server force‑terminated. World may not have saved fully."
+        await message.edit(embed=embed)
+    else:
+        embed.colour = discord.Color.red()
+        embed.description = f"❌ RCON failed: {response}\nFalling back to force termination..."
+        await message.edit(embed=embed)
+
+        for proc in psutil.process_iter(['pid', 'name', 'cwd']):
+            try:
+                if (proc.info['name'] == 'java.exe' and proc.info['cwd'] and 
+                    'hastur' in proc.info['cwd'].lower()):
+                    proc.terminate()
+                    await asyncio.sleep(2)
+                    if proc.is_running():
+                        proc.kill()
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        embed.description = "⚠️ Server force‑terminated (RCON issue)."
+        await message.edit(embed=embed)
 @bot.command()
 async def shutdownvalheim(ctx):
 	"""Shutdown Valheim server with backup reminder"""
